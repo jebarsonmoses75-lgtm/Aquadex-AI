@@ -342,94 +342,42 @@ with st.spinner("AI is analysing the sonar image..."):
 # Results
 # -----------------------------
 with col2:
-    st.subheader("🔎 AI Detection Result")
+    st.subheader("AI Analysis")
 
-    # Broad classification
     broad_name = broad_best["Type"]
-    broad_display = (
-        broad_name
-        .replace("a ", "")
-        .replace("an ", "")
-        .capitalize()
-    )
+    broad_display = broad_name.replace("a ", "").replace("an ", "").capitalize()
 
-    # Object type
-    type_name = type_best["Type"]
-    type_display = (
-        type_name
-        .replace("a ", "")
-        .replace("an ", "")
-        .capitalize()
-    )
-
-    # Main detected object card
-    st.markdown(
-        f"""
-        <div style="
-            padding: 20px;
-            border-radius: 15px;
-            border: 2px solid #4CAF50;
-            background-color: rgba(76,175,80,0.08);
-            margin-bottom: 20px;
-        ">
-            <h3>🎯 Detected Object Type</h3>
-            <h2>{type_display}</h2>
-            <p style="font-size:18px;">
-                <b>Confidence:</b> {type_conf:.1%}
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    # Confidence status
-    if type_conf >= threshold:
+    if broad_conf >= threshold:
         st.success(
-            f"✅ AI identified the image as **{type_display}** "
-            f"with **{type_conf:.1%} confidence**."
+            f"**Classification:** {broad_display}\n\n"
+            f"**Confidence:** {broad_conf:.1%}"
         )
     else:
         st.warning(
-            f"⚠️ The object-type confidence is below your selected "
-            f"threshold ({threshold:.0%})."
+            f"No broad classification above the selected threshold.\n\n"
+            f"Top result: {broad_display} ({broad_conf:.1%})"
         )
 
     st.divider()
 
-    # Broad classification
-    st.subheader("🧠 Scene Classification")
+    type_name = type_best["Type"]
+    type_display = type_name.replace("a ", "").replace("an ", "").capitalize()
 
-    broad_col1, broad_col2 = st.columns(2)
+    st.metric(
+        "Most likely object type",
+        type_display,
+        f"{type_conf:.1%} confidence"
+    )
 
-    with broad_col1:
-        st.metric(
-            "Scene Type",
-            broad_display
+    if type_conf >= threshold:
+        st.info(
+            f"**AI interpretation:** The image is most similar to "
+            f"**{type_display}** among the requested categories."
         )
-
-    with broad_col2:
-        st.metric(
-            "Confidence",
-            f"{broad_conf:.1%}"
+    else:
+        st.warning(
+            "The object-type confidence is below the selected threshold."
         )
-
-    st.divider()
-
-    # Detection summary
-    st.subheader("📋 Detection Summary")
-
-    summary_col1, summary_col2 = st.columns(2)
-
-    with summary_col1:
-        st.write("**Object Type**")
-        st.write(f"🔵 {type_display}")
-
-    with summary_col2:
-        st.write("**AI Confidence**")
-        st.write(f"📊 {type_conf:.1%}")
-
-    st.write("**Classification**")
-    st.write(f"🌊 {broad_display}")
 
 # -----------------------------
 # Ranking
