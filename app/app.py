@@ -33,7 +33,7 @@ st.markdown(
         padding-bottom: 0.5rem;
         padding-left: 1.2rem;
         padding-right: 1.2rem;
-        max-width: 100px;
+        max-width: 1500px;
     }
 
     /* Reduce title spacing */
@@ -41,6 +41,7 @@ st.markdown(
         margin-top: 0rem !important;
         margin-bottom: 0.1rem !important;
         font-size: 2.0rem !important;
+        max-width: 100% !important;
     }
 
     h2 {
