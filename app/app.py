@@ -333,7 +333,7 @@ def detect_debris(image, confidence=0.25):
     # ========================================================
 
     box_width = max(
-        100,
+        5,
         int(min(image.size) / 160)
     )
 
