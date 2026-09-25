@@ -40,8 +40,7 @@ st.markdown(
     h1 {
         margin-top: 0rem !important;
         margin-bottom: 0.1rem !important;
-        font-size: 2.5rem !important;
-        max-width: 100% !important;
+        font-size: 2.0rem !important;
     }
 
     h2 {
@@ -71,6 +70,11 @@ st.markdown(
         font-size: 1.15rem !important;
     }
 
+    /* Main image */
+    div[data-testid="stImage"] img {
+        max-height: 500px;
+        object-fit: contain;
+    }
 
     /* Horizontal lines */
     hr {
@@ -179,44 +183,87 @@ def load_debris_model():
 
 def detect_debris(image, confidence=0.25):
 
+    """
+    Detect ONE highest-confidence debris object.
+
+    Important settings:
+        max_det=1
+        iou=0.50
+        agnostic_nms=True
+
+    This prevents the same physical object from receiving
+    multiple red bounding boxes during the demo.
+    """
+
     model, model_path = load_debris_model()
 
     if model is None:
+
         return image.copy(), [], None
 
+
+    # --------------------------------------------------------
     # YOLO prediction
+    # --------------------------------------------------------
+
     results = model.predict(
+
         source=image,
+
         conf=confidence,
+
         iou=0.50,
+
         max_det=1,
+
         agnostic_nms=True,
+
         imgsz=640,
+
         verbose=False
     )
 
+
     if not results:
+
         return image.copy(), [], model_path
+
 
     result = results[0]
 
     annotated = image.copy()
+
     draw = ImageDraw.Draw(annotated)
 
     detections = []
 
-    # No detection
+
+    # --------------------------------------------------------
+    # No boxes
+    # --------------------------------------------------------
+
     if result.boxes is None or len(result.boxes) == 0:
+
         return annotated, detections, model_path
 
-    # Highest-confidence detection
+
+    # --------------------------------------------------------
+    # Get highest-confidence box
+    # --------------------------------------------------------
+
     best_index = 0
 
     if len(result.boxes) > 1:
+
         confidences = result.boxes.conf.tolist()
-        best_index = confidences.index(max(confidences))
+
+        best_index = confidences.index(
+            max(confidences)
+        )
+
 
     box = result.boxes[best_index]
+
 
     xyxy = box.xyxy[0].tolist()
 
@@ -225,36 +272,64 @@ def detect_debris(image, confidence=0.25):
         for v in xyxy
     ]
 
-    conf = float(box.conf[0])
-    cls_id = int(box.cls[0])
 
+    conf = float(
+        box.conf[0]
+    )
+
+
+    cls_id = int(
+        box.cls[0]
+    )
+
+
+    # --------------------------------------------------------
     # Class name
+    # --------------------------------------------------------
+
     names = model.names
 
     if isinstance(names, dict):
+
         class_name = names.get(
             cls_id,
             f"Class {cls_id}"
         )
+
     else:
+
         class_name = names[cls_id]
 
+
+    # --------------------------------------------------------
     # Detection information
+    # --------------------------------------------------------
+
     detection = {
+
         "type": str(class_name),
+
         "confidence": conf,
+
         "x1": x1,
+
         "y1": y1,
+
         "x2": x2,
+
         "y2": y2,
+
         "width": x2 - x1,
+
         "height": y2 - y1,
     }
 
+
     detections.append(detection)
 
+
     # ========================================================
-    # RED BOUNDING BOX
+    # DRAW SINGLE RED BOX
     # ========================================================
 
     box_width = max(
@@ -262,50 +337,47 @@ def detect_debris(image, confidence=0.25):
         int(min(image.size) / 160)
     )
 
+
     draw.rectangle(
+
         [x1, y1, x2, y2],
+
         outline=(255, 0, 0),
+
         width=box_width
     )
 
-    # ========================================================
-    # MODERATE FONT
-    # ========================================================
+
+    # --------------------------------------------------------
+    # Font
+    # --------------------------------------------------------
 
     font_size = max(
-        50,
-        int(min(image.size) / 12)
+        20,
+        int(min(image.size) / 40)
     )
 
-    font = None
 
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-        "C:/Windows/Fonts/arial.ttf"
-    ]
+    try:
 
-    for font_path in font_paths:
+        font = ImageFont.truetype(
+            "arial.ttf",
+            font_size
+        )
 
-        try:
-            font = ImageFont.truetype(
-                font_path,
-                font_size
-            )
-            break
+    except Exception:
 
-        except Exception:
-            pass
-
-    if font is None:
         font = ImageFont.load_default()
 
-    # ========================================================
-    # LABEL
-    # ========================================================
 
-    label = f"{class_name} {conf:.0%}"
+    # --------------------------------------------------------
+    # Label
+    # --------------------------------------------------------
+
+    label = (
+        f"{class_name} {conf:.0%}"
+    )
+
 
     bbox = draw.textbbox(
         (0, 0),
@@ -313,48 +385,66 @@ def detect_debris(image, confidence=0.25):
         font=font
     )
 
-    label_w = bbox[2] - bbox[0]
-    label_h = bbox[3] - bbox[1]
 
-    # Put label above the box
-    label_y = max(
-        0,
-        y1 - label_h - 8
+    label_w = (
+        bbox[2] - bbox[0]
     )
 
-    # ========================================================
-    # RED LABEL BACKGROUND
-    # ========================================================
+    label_h = (
+        bbox[3] - bbox[1]
+    )
+
+
+    # Put label above box where possible
+    label_y = max(
+        0,
+        y1 - label_h - 10
+    )
+
+
+    # --------------------------------------------------------
+    # Red label background
+    # --------------------------------------------------------
 
     draw.rectangle(
+
         [
             x1,
             label_y,
             x1 + label_w + 14,
             label_y + label_h + 10
         ],
+
         fill=(255, 0, 0)
     )
 
-    # ========================================================
-    # WHITE LABEL TEXT
-    # ========================================================
+
+    # --------------------------------------------------------
+    # White label text
+    # --------------------------------------------------------
 
     draw.text(
+
         (
             x1 + 7,
             label_y + 4
         ),
+
         label,
+
         fill=(255, 255, 255),
+
         font=font
     )
+
 
     return (
         annotated,
         detections,
         model_path
     )
+
+
 # ============================================================
 # CLIP CLASSIFICATION
 # ============================================================
