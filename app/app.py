@@ -71,12 +71,6 @@ st.markdown(
         font-size: 1.15rem !important;
     }
 
-    /* Main image */
-    div[data-testid="stImage"] img {
-        max-height: 700px;
-        width: 100%;
-        object-fit: contain;
-    }
 
     /* Horizontal lines */
     hr {
