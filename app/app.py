@@ -353,7 +353,7 @@ def detect_debris(image, confidence=0.25):
     # --------------------------------------------------------
 
     font_size = max(
-        20,
+        50,
         int(min(image.size) / 40)
     )
 
