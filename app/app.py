@@ -185,11 +185,6 @@ def load_debris_model():
 
 def detect_debris(image, confidence=0.25):
 
-    """
-    Detect ONE highest-confidence debris object
-    and draw one red bounding box with a large label.
-    """
-
     model, model_path = load_debris_model()
 
     if model is None:
@@ -216,11 +211,11 @@ def detect_debris(image, confidence=0.25):
 
     detections = []
 
-    # No detections
+    # No detection
     if result.boxes is None or len(result.boxes) == 0:
         return annotated, detections, model_path
 
-    # Highest-confidence box
+    # Highest-confidence detection
     best_index = 0
 
     if len(result.boxes) > 1:
@@ -237,7 +232,6 @@ def detect_debris(image, confidence=0.25):
     ]
 
     conf = float(box.conf[0])
-
     cls_id = int(box.cls[0])
 
     # Class name
@@ -270,8 +264,8 @@ def detect_debris(image, confidence=0.25):
     # ========================================================
 
     box_width = max(
-        6,
-        int(min(image.size) / 140)
+        5,
+        int(min(image.size) / 160)
     )
 
     draw.rectangle(
@@ -281,30 +275,32 @@ def detect_debris(image, confidence=0.25):
     )
 
     # ========================================================
-    # LARGE FONT
+    # MODERATE FONT
     # ========================================================
 
     font_size = max(
-        100,
-        int(min(image.size) / 10)
+        28,
+        int(min(image.size) / 32)
     )
-
-    font_paths = [
-        "C:/Windows/Fonts/arialbd.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    ]
 
     font = None
 
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+        "C:/Windows/Fonts/arial.ttf"
+    ]
+
     for font_path in font_paths:
+
         try:
             font = ImageFont.truetype(
                 font_path,
                 font_size
             )
             break
+
         except Exception:
             pass
 
@@ -326,9 +322,10 @@ def detect_debris(image, confidence=0.25):
     label_w = bbox[2] - bbox[0]
     label_h = bbox[3] - bbox[1]
 
+    # Put label above the box
     label_y = max(
         0,
-        y1 - label_h - 10
+        y1 - label_h - 8
     )
 
     # ========================================================
@@ -339,8 +336,8 @@ def detect_debris(image, confidence=0.25):
         [
             x1,
             label_y,
-            x1 + label_w + 30,
-            label_y + label_h + 24
+            x1 + label_w + 14,
+            label_y + label_h + 10
         ],
         fill=(255, 0, 0)
     )
@@ -351,8 +348,8 @@ def detect_debris(image, confidence=0.25):
 
     draw.text(
         (
-            x1 + 15,
-            label_y + 9
+            x1 + 7,
+            label_y + 4
         ),
         label,
         fill=(255, 255, 255),
