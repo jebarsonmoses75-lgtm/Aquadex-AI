@@ -185,86 +185,48 @@ def load_debris_model():
 def detect_debris(image, confidence=0.25):
 
     """
-    Detect ONE highest-confidence debris object.
-
-    Important settings:
-        max_det=1
-        iou=0.50
-        agnostic_nms=True
-
-    This prevents the same physical object from receiving
-    multiple red bounding boxes during the demo.
+    Detect ONE highest-confidence debris object
+    and draw one red bounding box with a large label.
     """
 
     model, model_path = load_debris_model()
 
     if model is None:
-
         return image.copy(), [], None
 
-
-    # --------------------------------------------------------
     # YOLO prediction
-    # --------------------------------------------------------
-
     results = model.predict(
-
         source=image,
-
         conf=confidence,
-
         iou=0.50,
-
         max_det=1,
-
         agnostic_nms=True,
-
         imgsz=640,
-
         verbose=False
     )
 
-
     if not results:
-
         return image.copy(), [], model_path
-
 
     result = results[0]
 
     annotated = image.copy()
-
     draw = ImageDraw.Draw(annotated)
 
     detections = []
 
-
-    # --------------------------------------------------------
-    # No boxes
-    # --------------------------------------------------------
-
+    # No detections
     if result.boxes is None or len(result.boxes) == 0:
-
         return annotated, detections, model_path
 
-
-    # --------------------------------------------------------
-    # Get highest-confidence box
-    # --------------------------------------------------------
-
+    # Highest-confidence box
     best_index = 0
 
     if len(result.boxes) > 1:
-
         confidences = result.boxes.conf.tolist()
-
-        best_index = confidences.index(
-            max(confidences)
-        )
-
+        best_index = confidences.index(max(confidences))
 
     box = result.boxes[best_index]
-
 
     xyxy = box.xyxy[0].tolist()
 
@@ -273,137 +235,89 @@ def detect_debris(image, confidence=0.25):
         for v in xyxy
     ]
 
+    conf = float(box.conf[0])
 
-    conf = float(
-        box.conf[0]
-    )
+    cls_id = int(box.cls[0])
 
-
-    cls_id = int(
-        box.cls[0]
-    )
-
-
-    # --------------------------------------------------------
     # Class name
-    # --------------------------------------------------------
-
     names = model.names
 
     if isinstance(names, dict):
-
         class_name = names.get(
             cls_id,
             f"Class {cls_id}"
         )
-
     else:
-
         class_name = names[cls_id]
 
-
-    # --------------------------------------------------------
     # Detection information
-    # --------------------------------------------------------
-
     detection = {
-
         "type": str(class_name),
-
         "confidence": conf,
-
         "x1": x1,
-
         "y1": y1,
-
         "x2": x2,
-
         "y2": y2,
-
         "width": x2 - x1,
-
         "height": y2 - y1,
     }
 
-
     detections.append(detection)
 
-
     # ========================================================
-    # DRAW SINGLE RED BOX
+    # RED BOUNDING BOX
     # ========================================================
 
     box_width = max(
-        5,
-        int(min(image.size) / 160)
+        6,
+        int(min(image.size) / 140)
     )
 
-
     draw.rectangle(
-
         [x1, y1, x2, y2],
-
         outline=(255, 0, 0),
-
         width=box_width
     )
 
-# --------------------------------------------------------
-# Font
-# --------------------------------------------------------
+    # ========================================================
+    # LARGE FONT
+    # ========================================================
 
-font_size = max(
-    45,
-    int(min(image.size) / 18)
-)
-
-font_paths = [
-
-    "arialbd.ttf",
-
-    "arial.ttf",
-
-    "C:/Windows/Fonts/arialbd.ttf",
-
-    "C:/Windows/Fonts/arial.ttf",
-
-    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
-
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-]
-
-font = None
-
-for font_path in font_paths:
-
-    try:
-
-        font = ImageFont.truetype(
-            font_path,
-            font_size
-        )
-
-        break
-
-    except Exception:
-
-        pass
-
-
-if font is None:
-
-    font = ImageFont.load_default()
-
-    # --------------------------------------------------------
-    # Label
-    # --------------------------------------------------------
-
-    label = (
-        f"{class_name} {conf:.0%}"
+    font_size = max(
+        45,
+        int(min(image.size) / 18)
     )
 
+    font_paths = [
+        "arialbd.ttf",
+        "arial.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    ]
+
+    font = None
+
+    for font_path in font_paths:
+        try:
+            font = ImageFont.truetype(
+                font_path,
+                font_size
+            )
+            break
+        except Exception:
+            pass
+
+    if font is None:
+        font = ImageFont.load_default()
+
+    # ========================================================
+    # LABEL
+    # ========================================================
+
+    label = f"{class_name} {conf:.0%}"
 
     bbox = draw.textbbox(
         (0, 0),
@@ -411,63 +325,47 @@ if font is None:
         font=font
     )
 
+    label_w = bbox[2] - bbox[0]
+    label_h = bbox[3] - bbox[1]
 
-    label_w = (
-        bbox[2] - bbox[0]
-    )
-
-    label_h = (
-        bbox[3] - bbox[1]
-    )
-
-
-    # Put label above box where possible
     label_y = max(
         0,
         y1 - label_h - 10
     )
 
-
-    # --------------------------------------------------------
-    # Red label background
-    # --------------------------------------------------------
+    # ========================================================
+    # RED LABEL BACKGROUND
+    # ========================================================
 
     draw.rectangle(
-
         [
             x1,
             label_y,
-            x1 + label_w + 34,
+            x1 + label_w + 30,
             label_y + label_h + 24
         ],
-
         fill=(255, 0, 0)
     )
 
-
-    # --------------------------------------------------------
-    # White label text
-    # --------------------------------------------------------
+    # ========================================================
+    # WHITE LABEL TEXT
+    # ========================================================
 
     draw.text(
-
         (
             x1 + 15,
             label_y + 9
         ),
-
         label,
-
         fill=(255, 255, 255),
-
         font=font
     )
-return (
+
+    return (
         annotated,
         detections,
         model_path
     )
-
 # ============================================================
 # CLIP CLASSIFICATION
 # ============================================================
