@@ -40,7 +40,7 @@ st.markdown(
     h1 {
         margin-top: 0rem !important;
         margin-bottom: 0.1rem !important;
-        font-size: 2.0rem !important;
+        font-size: 2.5rem !important;
         max-width: 100% !important;
     }
 
@@ -348,25 +348,53 @@ def detect_debris(image, confidence=0.25):
         width=box_width
     )
 
+# --------------------------------------------------------
+# Font
+# --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # Font
-    # --------------------------------------------------------
+font_size = max(
+    45,
+    int(min(image.size) / 18)
+)
 
-    font_size = 55
+font_paths = [
 
+    "arialbd.ttf",
+
+    "arial.ttf",
+
+    "C:/Windows/Fonts/arialbd.ttf",
+
+    "C:/Windows/Fonts/arial.ttf",
+
+    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
+
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+]
+
+font = None
+
+for font_path in font_paths:
 
     try:
 
         font = ImageFont.truetype(
-            "arial.ttf",
+            font_path,
             font_size
         )
 
+        break
+
     except Exception:
 
-        font = ImageFont.load_default()
+        pass
 
+
+if font is None:
+
+    font = ImageFont.load_default()
 
     # --------------------------------------------------------
     # Label
@@ -409,8 +437,8 @@ def detect_debris(image, confidence=0.25):
         [
             x1,
             label_y,
-            x1 + label_w + 24,
-            label_y + label_h + 18
+            x1 + label_w + 34,
+            label_y + label_h + 24
         ],
 
         fill=(255, 0, 0)
@@ -424,8 +452,8 @@ def detect_debris(image, confidence=0.25):
     draw.text(
 
         (
-            x1 + 12,
-            label_y + 7
+            x1 + 15,
+            label_y + 9
         ),
 
         label,
