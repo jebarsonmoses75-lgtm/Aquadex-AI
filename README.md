@@ -50,10 +50,8 @@ Aquadex-AI/
 │   └── app.py
 │
 ├── demo/
-│   ├── Sonar image 1.png
-│   ├── Sonar image 2.png
-│   ├── Sonar image 3.png
-│   └── Sonar image 4.png
+│   ├── Sample input.png
+│   └── aquadex_demo_ocean_survey_20.csv
 │
 ├── gps/
 │   └── metadata_parser.py
