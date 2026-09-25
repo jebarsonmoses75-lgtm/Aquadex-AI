@@ -73,7 +73,8 @@ st.markdown(
 
     /* Main image */
     div[data-testid="stImage"] img {
-        max-height: 500px;
+        max-height: 700px;
+        width: 100%;
         object-fit: contain;
     }
 
@@ -284,16 +285,13 @@ def detect_debris(image, confidence=0.25):
     # ========================================================
 
     font_size = max(
-        45,
-        int(min(image.size) / 18)
+        100,
+        int(min(image.size) / 10)
     )
 
     font_paths = [
-        "arialbd.ttf",
-        "arial.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
         "C:/Windows/Fonts/arial.ttf",
-        "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     ]
