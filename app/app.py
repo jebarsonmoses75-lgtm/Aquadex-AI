@@ -157,12 +157,12 @@ def load_debris_model():
         Path("best.pt"),
 
         # Common folders
-        base_dir / "models" / "best.pt",
-        base_dir / "model" / "best.pt",
-        base_dir / "weights" / "best.pt",
+        base_dir.parent / "models" / "best.pt",
+        base_dir.parent / "model" / "best.pt",
+        base_dir.parent / "weights" / "best.pt",
 
         # app/models
-        base_dir / "app" / "best.pt",
+        base_dir.parent / "app" / "best.pt",
 
     ]
 
