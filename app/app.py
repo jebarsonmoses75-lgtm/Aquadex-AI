@@ -3,7 +3,6 @@ import pandas as pd
 import folium
 import json
 from streamlit_folium import st_folium
-from ultralytics import YOLO
 from PIL import Image
 from datetime import datetime
 # ============================================================
