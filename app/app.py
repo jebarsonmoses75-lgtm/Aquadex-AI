@@ -143,47 +143,7 @@ else:
         value=76.955000,
         format="%.6f"
     )
-    # ============================================================
-# GOOGLE MAPS LOCATION LINK
-# ============================================================
-
-st.subheader("📍 Survey Location")
-
-if gps_mode == "Real GPS / Survey CSV" and survey_df is not None:
-
-    # Use the first valid GPS point from the survey CSV
-    latitude = float(survey_df.iloc[0]["latitude"])
-    longitude = float(survey_df.iloc[0]["longitude"])
-
-    google_maps_url = (
-        "https://www.google.com/maps/search/?api=1"
-        f"&query={latitude},{longitude}"
-    )
-
-    st.markdown(
-        f"🌍 [Open Survey Location in Google Maps]({google_maps_url})"
-    )
-
-    st.write(f"**Latitude:** {latitude:.6f}")
-    st.write(f"**Longitude:** {longitude:.6f}")
-
-elif gps_mode == "Simulator GPS":
-
-    latitude = simulator_lat
-    longitude = simulator_lon
-
-    google_maps_url = (
-        "https://www.google.com/maps/search/?api=1"
-        f"&query={latitude},{longitude}"
-    )
-
-    st.markdown(
-        f"🌍 [Open Simulator Location in Google Maps]({google_maps_url})"
-    )
-
-    st.write(f"**Latitude:** {latitude:.6f}")
-    st.write(f"**Longitude:** {longitude:.6f}")
-    # Optional AI packages:
+        # Optional AI packages:
 # pip install transformers torch torchvision sentencepiece
 
 st.set_page_config(
@@ -195,7 +155,7 @@ st.set_page_config(
 st.title("🌊 Aquadex AI")
 st.caption("Underwater sonar image analysis")
 
-# -----------------------------
+# ----------------------------- 
 # Load zero-shot image model
 # -----------------------------
 @st.cache_resource
@@ -238,47 +198,134 @@ def classify_image(image, labels):
 
     results.sort(key=lambda x: x["Confidence"], reverse=True)
     return results
+# ============================================================
+# SONAR IMAGE VALIDATION
+# ============================================================
+
+def validate_sonar_image(image):
+    """
+    Dedicated SONAR vs NON-SONAR gate.
+
+    This does NOT use the debris/object labels. It asks CLIP the
+    same binary question several different ways and averages the
+    pairwise sonar probabilities. This is more reliable than
+    putting "unclear sonar scene" into the same competition.
+    """
+
+    import torch
+
+    processor, model = load_ai_model()
+
+    prompt_pairs = [
+        (
+            "a genuine side-scan sonar image",
+            "a normal camera photograph"
+        ),
+        (
+            "an acoustic sonar scan of the seafloor",
+            "an ordinary underwater camera photograph"
+        ),
+        (
+            "a marine sonar survey image",
+            "a regular underwater photograph"
+        ),
+        (
+            "a side-looking sonar / sidescan sonar image",
+            "a non-sonar photograph"
+        ),
+        (
+            "a grayscale sonar waterfall or seabed scan",
+            "a normal grayscale photograph"
+        ),
+        (
+            "an underwater acoustic imaging scan",
+            "a conventional underwater photo"
+        )
+    ]
+
+    sonar_probabilities = []
+
+    for sonar_prompt, non_sonar_prompt in prompt_pairs:
+
+        inputs = processor(
+            text=[sonar_prompt, non_sonar_prompt],
+            images=image,
+            return_tensors="pt",
+            padding=True
+        )
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        pair_probability = (
+            outputs.logits_per_image
+            .softmax(dim=1)[0][0]
+            .item()
+        )
+
+        sonar_probabilities.append(pair_probability)
+
+    sonar_probability = sum(
+        sonar_probabilities
+    ) / len(sonar_probabilities)
+
+    # For a hackathon prototype, 50% is the neutral point.
+    # We use a moderate gate so genuine sonar imagery is not
+    # rejected just because CLIP is uncertain.
+    is_sonar = sonar_probability >= sonar_threshold
+
+    return {
+        "is_sonar": is_sonar,
+        "sonar_probability": sonar_probability,
+        "pair_scores": sonar_probabilities
+    }
 
 
-# -----------------------------
-# Sidebar
-# -----------------------------
+
+# ============================================================
+# SIDEBAR - ANALYSIS SETTINGS
+# ============================================================
+
 st.sidebar.header("⚙️ Analysis Settings")
 
 threshold = st.sidebar.slider(
-    "Minimum confidence",
+    "Minimum object confidence",
     0.0,
     1.0,
     0.20,
     0.01
 )
 
-st.sidebar.divider()
-
-st.sidebar.header("📍 GPS")
-
-gps_source = st.sidebar.radio(
-    "GPS source",
-    ["Manual GPS input", "No GPS"]
+sonar_threshold = st.sidebar.slider(
+    "Sonar validation threshold",
+    0.45,
+    0.80,
+    0.52,
+    0.01,
+    help="Lower values accept uncertain sonar images; higher values make validation stricter."
 )
+
+st.sidebar.info(
+    "Only images classified as sonar/side-scan sonar will continue "
+    "to the debris analysis."
+)
+# ============================================================
+# GPS VALUES - ALWAYS INITIALIZED
+# ============================================================
 
 latitude = 0.0
 longitude = 0.0
+gps_source = "No GPS"
 
-if gps_source == "Manual GPS input":
-    latitude = st.sidebar.number_input(
-        "Latitude",
-        value=0.0,
-        format="%.6f"
-    )
+if gps_mode == "Real GPS / Survey CSV" and survey_df is not None:
+    latitude = float(survey_df.iloc[0]["latitude"])
+    longitude = float(survey_df.iloc[0]["longitude"])
+    gps_source = "Verified survey CSV"
 
-    longitude = st.sidebar.number_input(
-        "Longitude",
-        value=0.0,
-        format="%.6f"
-    )
-
-st.sidebar.divider()
+elif gps_mode == "Simulator GPS":
+    latitude = float(simulator_lat)
+    longitude = float(simulator_lon)
+    gps_source = "Simulator GPS"
 
 
 
@@ -301,6 +348,84 @@ col1, col2 = st.columns([1.1, 1])
 with col1:
     st.subheader("Input Image")
     st.image(image, use_container_width=True)
+
+# ============================================================
+# SONAR VALIDATION
+# ============================================================
+
+with st.spinner("🔎 Checking whether the image is a sonar image..."):
+
+    sonar_check = validate_sonar_image(image)
+
+sonar_probability = sonar_check["sonar_probability"]
+
+# ------------------------------------------------------------
+# IMPORTANT:
+# Stop the application if the image is not sonar.
+# No debris/object classification is performed.
+# ------------------------------------------------------------
+
+if sonar_probability < sonar_threshold:
+
+    with col2:
+
+        st.subheader("AI Analysis")
+
+        st.error(
+            "❌ Invalid image: This does not appear to be a "
+            "sonar / side-scan sonar image."
+        )
+
+        st.metric(
+            "Sonar confidence",
+            f"{sonar_probability:.1%}"
+        )
+
+        st.warning(
+            "Please upload a genuine underwater sonar or "
+            "side-scan sonar image."
+        )
+
+        st.info(
+            "Examples accepted: side-scan sonar scans, "
+            "underwater acoustic sonar survey images, and "
+            "seabed sonar imagery."
+        )
+
+    st.divider()
+
+    st.subheader("🚫 Analysis stopped")
+
+    st.write(
+        "Aquadex AI does not run marine-debris classification "
+        "on non-sonar images."
+    )
+
+    st.caption(
+        "Note: This is a prototype sonar gate. It is not a "
+        "sonar-trained scientific classifier."
+    )
+
+    st.stop()
+
+# ============================================================
+# SONAR ACCEPTED
+# ============================================================
+
+with col2:
+
+    st.subheader("AI Analysis")
+
+    st.success(
+        f"✅ Sonar image accepted\n\n"
+        f"**Sonar confidence:** {sonar_probability:.1%}"
+    )
+
+    st.caption(
+        "Sonar validation uses six independent sonar-vs-photo "
+        "comparisons and averages their results."
+    )
+
 
 # -----------------------------
 # Classification
@@ -378,6 +503,63 @@ with col2:
         st.warning(
             "The object-type confidence is below the selected threshold."
         )
+# ============================================================
+# SONAR VALIDATION DETAILS
+# ============================================================
+
+st.divider()
+st.subheader("🛰️ Sonar Validation")
+
+# ============================================================
+# GOOGLE MAPS LOCATION LINK
+# ============================================================
+
+st.subheader("📍 Survey Location")
+
+if gps_mode == "Real GPS / Survey CSV" and survey_df is not None:
+
+    # Use the first valid GPS point from the survey CSV
+    latitude = float(survey_df.iloc[0]["latitude"])
+    longitude = float(survey_df.iloc[0]["longitude"])
+
+    google_maps_url = (
+        "https://www.google.com/maps/search/?api=1"
+        f"&query={latitude},{longitude}"
+    )
+
+    st.markdown(
+        f"🌍 [Open Survey Location in Google Maps]({google_maps_url})"
+    )
+
+    st.write(f"**Latitude:** {latitude:.6f}")
+    st.write(f"**Longitude:** {longitude:.6f}")
+
+elif gps_mode == "Simulator GPS":
+
+    latitude = simulator_lat
+    longitude = simulator_lon
+
+    google_maps_url = (
+        "https://www.google.com/maps/search/?api=1"
+        f"&query={latitude},{longitude}"
+    )
+
+    st.markdown(
+        f"🌍 [Open Simulator Location in Google Maps]({google_maps_url})"
+    )
+
+    st.write(f"**Latitude:** {latitude:.6f}")
+    st.write(f"**Longitude:** {longitude:.6f}")
+
+
+validation_table = pd.DataFrame([
+    {
+        "Check": "Sonar image",
+        "Result": "PASS",
+        "Confidence": f"{sonar_probability:.1%}"
+    },
+])
+
 
 # -----------------------------
 # Ranking
@@ -394,6 +576,7 @@ st.dataframe(
     hide_index=True
 )
 
+
 # -----------------------------
 # Export
 # -----------------------------
@@ -404,6 +587,8 @@ report = {
     "project": "Aquadex AI",
     "image": uploaded_file.name,
     "timestamp": datetime.now().isoformat(),
+     "sonar_validation": "PASS",
+    "sonar_confidence": round(sonar_probability,4),
     "broad_classification": broad_display,
     "broad_confidence": round(broad_conf, 4),
     "object_type": type_display,

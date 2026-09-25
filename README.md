@@ -478,4 +478,4 @@ Future versions can expand the model with additional labeled underwater/sonar cl
 
 Aquadex AI
 
-AI-powered underwater sonar analysis and shipwreck detection prototype.
+AI-powered underwater sonar analysis and Debris detection prototype.
