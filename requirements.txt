@@ -6,6 +6,4 @@ pandas
 numpy
 pillow
 opencv-python-headless
-folium
-streamlit-folium
 transformers
