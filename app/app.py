@@ -462,7 +462,7 @@ if font is None:
 
         font=font
     )
-    return (
+return (
         annotated,
         detections,
         model_path
