@@ -33,7 +33,7 @@ st.markdown(
         padding-bottom: 0.5rem;
         padding-left: 1.2rem;
         padding-right: 1.2rem;
-        max-width: 1500px;
+        max-width: 100px;
     }
 
     /* Reduce title spacing */
@@ -352,10 +352,7 @@ def detect_debris(image, confidence=0.25):
     # Font
     # --------------------------------------------------------
 
-    font_size = max(
-        40,
-        int(min(image.size) / 20)
-    )
+    font_size = 55
 
 
     try:
