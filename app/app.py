@@ -462,14 +462,7 @@ if font is None:
 
         font=font
     )
-
-
-    return (
-        annotated,
-        detections,
-        model_path
-    )
-
+     return(annotated,detections,model_path
 
 # ============================================================
 # CLIP CLASSIFICATION
