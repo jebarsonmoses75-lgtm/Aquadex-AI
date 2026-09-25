@@ -1,129 +1,942 @@
 import streamlit as st
 import pandas as pd
-import folium
 import json
-from streamlit_folium import st_folium
-from PIL import Image
+
+from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
+from pathlib import Path
+
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+
+st.set_page_config(
+    page_title="Aquadex AI",
+    page_icon="🌊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+
+# ============================================================
+# COMPACT / SINGLE-SCREEN UI
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
+    /* Main page */
+    .block-container {
+        padding-top: 0.7rem;
+        padding-bottom: 0.5rem;
+        padding-left: 1.2rem;
+        padding-right: 1.2rem;
+        max-width: 1500px;
+    }
+
+    /* Reduce title spacing */
+    h1 {
+        margin-top: 0rem !important;
+        margin-bottom: 0.1rem !important;
+        font-size: 2.0rem !important;
+    }
+
+    h2 {
+        margin-top: 0.3rem !important;
+        margin-bottom: 0.3rem !important;
+        font-size: 1.35rem !important;
+    }
+
+    h3 {
+        margin-top: 0.25rem !important;
+        margin-bottom: 0.25rem !important;
+        font-size: 1.05rem !important;
+    }
+
+    /* Reduce alert size */
+    div[data-testid="stAlert"] {
+        padding: 0.45rem 0.7rem !important;
+        margin-bottom: 0.35rem !important;
+    }
+
+    /* Reduce metrics */
+    div[data-testid="stMetric"] {
+        padding: 0.15rem !important;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.15rem !important;
+    }
+
+    /* Main image */
+    div[data-testid="stImage"] img {
+        max-height: 500px;
+        object-fit: contain;
+    }
+
+    /* Horizontal lines */
+    hr {
+        margin-top: 0.4rem !important;
+        margin-bottom: 0.4rem !important;
+    }
+
+    /* Expander */
+    details {
+        margin-top: 0.25rem !important;
+        margin-bottom: 0.25rem !important;
+    }
+
+    /* Caption */
+    .stCaption {
+        margin-top: 0rem !important;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# HEADER
+# ============================================================
+
+st.title("🌊 Aquadex AI")
+
+st.caption(
+    "Underwater sonar image analysis • AI debris detection • GPS survey tagging"
+)
+
+
+# ============================================================
+# LOAD CLIP MODEL
+# ============================================================
+
+@st.cache_resource
+def load_ai_model():
+
+    from transformers import CLIPProcessor, CLIPModel
+
+    model_name = "openai/clip-vit-base-patch32"
+
+    processor = CLIPProcessor.from_pretrained(model_name)
+
+    model = CLIPModel.from_pretrained(model_name)
+
+    model.eval()
+
+    return processor, model
+
+
+# ============================================================
+# LOAD YOLO DEBRIS MODEL
+# ============================================================
+
+@st.cache_resource
+def load_debris_model():
+
+    """
+    Searches for best.pt in common project locations.
+    """
+
+    from ultralytics import YOLO
+
+    base_dir = Path(__file__).resolve().parent
+
+    possible_paths = [
+
+        # Same folder as app.py
+        base_dir / "best.pt",
+
+        # Parent folder
+        base_dir.parent / "best.pt",
+
+        # Current working directory
+        Path("best.pt"),
+
+        # Common folders
+        base_dir / "models" / "best.pt",
+        base_dir / "model" / "best.pt",
+        base_dir / "weights" / "best.pt",
+
+        # app/models
+        base_dir / "app" / "best.pt",
+
+    ]
+
+    for model_path in possible_paths:
+
+        if model_path.exists():
+
+            model = YOLO(str(model_path))
+
+            return model, str(model_path)
+
+    return None, None
+
+
+# ============================================================
+# YOLO DEBRIS DETECTION
+# ============================================================
+
+def detect_debris(image, confidence=0.25):
+
+    """
+    Detect ONE highest-confidence debris object.
+
+    Important settings:
+        max_det=1
+        iou=0.50
+        agnostic_nms=True
+
+    This prevents the same physical object from receiving
+    multiple red bounding boxes during the demo.
+    """
+
+    model, model_path = load_debris_model()
+
+    if model is None:
+
+        return image.copy(), [], None
+
+
+    # --------------------------------------------------------
+    # YOLO prediction
+    # --------------------------------------------------------
+
+    results = model.predict(
+
+        source=image,
+
+        conf=confidence,
+
+        iou=0.50,
+
+        max_det=1,
+
+        agnostic_nms=True,
+
+        imgsz=640,
+
+        verbose=False
+    )
+
+
+    if not results:
+
+        return image.copy(), [], model_path
+
+
+    result = results[0]
+
+    annotated = image.copy()
+
+    draw = ImageDraw.Draw(annotated)
+
+    detections = []
+
+
+    # --------------------------------------------------------
+    # No boxes
+    # --------------------------------------------------------
+
+    if result.boxes is None or len(result.boxes) == 0:
+
+        return annotated, detections, model_path
+
+
+    # --------------------------------------------------------
+    # Get highest-confidence box
+    # --------------------------------------------------------
+
+    best_index = 0
+
+    if len(result.boxes) > 1:
+
+        confidences = result.boxes.conf.tolist()
+
+        best_index = confidences.index(
+            max(confidences)
+        )
+
+
+    box = result.boxes[best_index]
+
+
+    xyxy = box.xyxy[0].tolist()
+
+    x1, y1, x2, y2 = [
+        int(v)
+        for v in xyxy
+    ]
+
+
+    conf = float(
+        box.conf[0]
+    )
+
+
+    cls_id = int(
+        box.cls[0]
+    )
+
+
+    # --------------------------------------------------------
+    # Class name
+    # --------------------------------------------------------
+
+    names = model.names
+
+    if isinstance(names, dict):
+
+        class_name = names.get(
+            cls_id,
+            f"Class {cls_id}"
+        )
+
+    else:
+
+        class_name = names[cls_id]
+
+
+    # --------------------------------------------------------
+    # Detection information
+    # --------------------------------------------------------
+
+    detection = {
+
+        "type": str(class_name),
+
+        "confidence": conf,
+
+        "x1": x1,
+
+        "y1": y1,
+
+        "x2": x2,
+
+        "y2": y2,
+
+        "width": x2 - x1,
+
+        "height": y2 - y1,
+    }
+
+
+    detections.append(detection)
+
+
+    # ========================================================
+    # DRAW SINGLE RED BOX
+    # ========================================================
+
+    box_width = max(
+        5,
+        int(min(image.size) / 160)
+    )
+
+
+    draw.rectangle(
+
+        [x1, y1, x2, y2],
+
+        outline=(255, 0, 0),
+
+        width=box_width
+    )
+
+
+    # --------------------------------------------------------
+    # Font
+    # --------------------------------------------------------
+
+    font_size = max(
+        20,
+        int(min(image.size) / 40)
+    )
+
+
+    try:
+
+        font = ImageFont.truetype(
+            "arial.ttf",
+            font_size
+        )
+
+    except Exception:
+
+        font = ImageFont.load_default()
+
+
+    # --------------------------------------------------------
+    # Label
+    # --------------------------------------------------------
+
+    label = (
+        f"{class_name} {conf:.0%}"
+    )
+
+
+    bbox = draw.textbbox(
+        (0, 0),
+        label,
+        font=font
+    )
+
+
+    label_w = (
+        bbox[2] - bbox[0]
+    )
+
+    label_h = (
+        bbox[3] - bbox[1]
+    )
+
+
+    # Put label above box where possible
+    label_y = max(
+        0,
+        y1 - label_h - 10
+    )
+
+
+    # --------------------------------------------------------
+    # Red label background
+    # --------------------------------------------------------
+
+    draw.rectangle(
+
+        [
+            x1,
+            label_y,
+            x1 + label_w + 14,
+            label_y + label_h + 10
+        ],
+
+        fill=(255, 0, 0)
+    )
+
+
+    # --------------------------------------------------------
+    # White label text
+    # --------------------------------------------------------
+
+    draw.text(
+
+        (
+            x1 + 7,
+            label_y + 4
+        ),
+
+        label,
+
+        fill=(255, 255, 255),
+
+        font=font
+    )
+
+
+    return (
+        annotated,
+        detections,
+        model_path
+    )
+
+
+# ============================================================
+# CLIP CLASSIFICATION
+# ============================================================
+
+def classify_image(image, labels):
+
+    import torch
+
+    processor, model = load_ai_model()
+
+
+    prompts = [
+
+        f"{label}"
+
+        for label in labels
+
+    ]
+
+
+    inputs = processor(
+
+        text=prompts,
+
+        images=image,
+
+        return_tensors="pt",
+
+        padding=True
+    )
+
+
+    with torch.no_grad():
+
+        outputs = model(**inputs)
+
+        probabilities = (
+            outputs.logits_per_image
+            .softmax(dim=1)[0]
+        )
+
+
+    results = []
+
+
+    for label, probability in zip(
+        labels,
+        probabilities
+    ):
+
+        results.append({
+
+            "Type": label,
+
+            "Confidence": float(
+                probability
+            )
+
+        })
+
+
+    results.sort(
+
+        key=lambda x: x["Confidence"],
+
+        reverse=True
+    )
+
+
+    return results
+
+
+# ============================================================
+# SONAR VALIDATION
+# ============================================================
+
+def validate_sonar_image(
+    image,
+    sonar_threshold=0.52
+):
+
+    """
+    Determines whether an uploaded image resembles
+    side-scan / underwater sonar imagery.
+
+    Uses six independent CLIP comparisons and averages them.
+    """
+
+    import torch
+
+
+    processor, model = load_ai_model()
+
+
+    prompt_pairs = [
+
+        (
+            "a genuine side-scan sonar image",
+            "a normal camera photograph"
+        ),
+
+        (
+            "an acoustic sonar scan of the seafloor",
+            "an ordinary underwater camera photograph"
+        ),
+
+        (
+            "a marine sonar survey image",
+            "a regular underwater photograph"
+        ),
+
+        (
+            "a side-looking sonar image",
+            "a non-sonar photograph"
+        ),
+
+        (
+            "a grayscale sonar seabed scan",
+            "a normal grayscale photograph"
+        ),
+
+        (
+            "an underwater acoustic imaging scan",
+            "a conventional underwater photo"
+        )
+
+    ]
+
+
+    sonar_probabilities = []
+
+
+    for (
+        sonar_prompt,
+        non_sonar_prompt
+    ) in prompt_pairs:
+
+
+        inputs = processor(
+
+            text=[
+                sonar_prompt,
+                non_sonar_prompt
+            ],
+
+            images=image,
+
+            return_tensors="pt",
+
+            padding=True
+        )
+
+
+        with torch.no_grad():
+
+            outputs = model(**inputs)
+
+
+        pair_probability = (
+
+            outputs
+            .logits_per_image
+            .softmax(dim=1)[0][0]
+            .item()
+
+        )
+
+
+        sonar_probabilities.append(
+            pair_probability
+        )
+
+
+    sonar_probability = (
+
+        sum(sonar_probabilities)
+        /
+        len(sonar_probabilities)
+
+    )
+
+
+    is_sonar = (
+
+        sonar_probability
+        >=
+        sonar_threshold
+
+    )
+
+
+    return {
+
+        "is_sonar": is_sonar,
+
+        "sonar_probability":
+            sonar_probability,
+
+        "pair_scores":
+            sonar_probabilities
+    }
+
+
+# ============================================================
+# SIDEBAR SETTINGS
+# ============================================================
+
+st.sidebar.header("⚙️ Analysis Settings")
+
+
+# ------------------------------------------------------------
+# SINGLE CONFIDENCE SLIDER
+# ------------------------------------------------------------
+
+confidence_threshold = st.sidebar.slider(
+
+    "Detection confidence",
+
+    min_value=0.10,
+
+    max_value=0.90,
+
+    value=0.25,
+
+    step=0.05,
+
+    help=(
+        "Only detections above this confidence "
+        "are displayed."
+    )
+)
+
+
+# ------------------------------------------------------------
+# FIXED SONAR THRESHOLD
+# ------------------------------------------------------------
+
+SONAR_THRESHOLD = 0.52
+
+
+st.sidebar.info(
+
+    "Only one confidence bar is used. "
+    "The highest-confidence debris detection "
+    "is shown with one RED bounding box."
+)
+
+
 # ============================================================
 # GEO-TAGGING / SURVEY GPS
 # ============================================================
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("📍 Geo-tagging")
+st.sidebar.divider()
+
+st.sidebar.subheader(
+    "📍 Geo-tagging"
+)
+
 
 gps_mode = st.sidebar.radio(
+
     "GPS Mode",
+
     [
         "Real GPS / Survey CSV",
         "Simulator GPS"
     ],
+
     index=0
 )
 
+
 survey_df = None
+
+
+# ============================================================
+# REAL GPS CSV
+# ============================================================
 
 if gps_mode == "Real GPS / Survey CSV":
 
     st.sidebar.info(
-        "Upload the GPS/navigation CSV recorded during the sonar survey."
+
+        "Upload the GPS/navigation CSV "
+        "recorded during the sonar survey."
     )
 
+
     gps_file = st.sidebar.file_uploader(
+
         "Upload survey GPS CSV",
+
         type=["csv"],
+
         key="survey_gps_csv"
     )
+
 
     if gps_file is not None:
 
         try:
-            survey_df = pd.read_csv(gps_file)
+
+            survey_df = pd.read_csv(
+                gps_file
+            )
+
 
             # Normalize column names
             survey_df.columns = [
-                str(c).strip().lower().replace(" ", "_")
+
+                str(c)
+                .strip()
+                .lower()
+                .replace(" ", "_")
+
                 for c in survey_df.columns
+
             ]
 
-            # Find latitude column
+
             latitude_candidates = [
+
                 "latitude",
                 "lat",
                 "gps_latitude",
                 "gps_lat"
+
             ]
 
+
             longitude_candidates = [
+
                 "longitude",
                 "lon",
                 "lng",
                 "gps_longitude",
                 "gps_lon"
+
             ]
 
+
             lat_col = next(
-                (c for c in latitude_candidates if c in survey_df.columns),
+
+                (
+                    c
+
+                    for c
+                    in latitude_candidates
+
+                    if c in survey_df.columns
+
+                ),
+
                 None
+
             )
+
 
             lon_col = next(
-                (c for c in longitude_candidates if c in survey_df.columns),
+
+                (
+                    c
+
+                    for c
+                    in longitude_candidates
+
+                    if c in survey_df.columns
+
+                ),
+
                 None
+
             )
 
-            if lat_col is None or lon_col is None:
+
+            if (
+                lat_col is None
+                or
+                lon_col is None
+            ):
 
                 st.sidebar.error(
-                    "CSV must contain latitude and longitude columns."
+
+                    "CSV must contain "
+                    "latitude and longitude columns."
                 )
 
+
                 st.sidebar.write(
+
                     "Columns found:",
-                    list(survey_df.columns)
+
+                    list(
+                        survey_df.columns
+                    )
+
                 )
+
 
                 survey_df = None
 
+
             else:
 
-                survey_df[lat_col] = pd.to_numeric(
-                    survey_df[lat_col],
+                survey_df[
+                    lat_col
+                ] = pd.to_numeric(
+
+                    survey_df[
+                        lat_col
+                    ],
+
                     errors="coerce"
                 )
 
-                survey_df[lon_col] = pd.to_numeric(
-                    survey_df[lon_col],
+
+                survey_df[
+                    lon_col
+                ] = pd.to_numeric(
+
+                    survey_df[
+                        lon_col
+                    ],
+
                     errors="coerce"
                 )
 
-                survey_df = survey_df.dropna(
-                    subset=[lat_col, lon_col]
-                ).reset_index(drop=True)
+
+                survey_df = (
+
+                    survey_df
+
+                    .dropna(
+                        subset=[
+                            lat_col,
+                            lon_col
+                        ]
+                    )
+
+                    .reset_index(
+                        drop=True
+                    )
+
+                )
+
 
                 if len(survey_df) == 0:
 
                     st.sidebar.error(
-                        "No valid GPS coordinates were found."
+
+                        "No valid GPS coordinates "
+                        "were found."
                     )
 
                     survey_df = None
 
+
                 else:
 
-                    # Store standardized names
-                    survey_df["latitude"] = survey_df[lat_col]
-                    survey_df["longitude"] = survey_df[lon_col]
+                    survey_df[
+                        "latitude"
+                    ] = survey_df[
+                        lat_col
+                    ]
+
+
+                    survey_df[
+                        "longitude"
+                    ] = survey_df[
+                        lon_col
+                    ]
+
 
                     st.sidebar.success(
-                        f"Loaded {len(survey_df)} GPS positions"
+
+                        f"Loaded "
+                        f"{len(survey_df)} "
+                        f"GPS positions"
                     )
+
 
         except Exception as e:
 
             st.sidebar.error(
+
                 f"Could not read GPS CSV: {e}"
             )
+
+
+# ============================================================
+# SIMULATOR GPS
+# ============================================================
 
 else:
 
@@ -131,384 +944,724 @@ else:
         "Simulator GPS is for demonstration only."
     )
 
+
     simulator_lat = st.sidebar.number_input(
+
         "Latitude",
+
         value=11.341000,
+
         format="%.6f"
     )
+
 
     simulator_lon = st.sidebar.number_input(
+
         "Longitude",
+
         value=76.955000,
+
         format="%.6f"
     )
-        # Optional AI packages:
-# pip install transformers torch torchvision sentencepiece
-
-st.set_page_config(
-    page_title="Aquadex AI",
-    page_icon="🌊",
-    layout="wide"
-)
-
-st.title("🌊 Aquadex AI")
-st.caption("Underwater sonar image analysis")
-
-# ----------------------------- 
-# Load zero-shot image model
-# -----------------------------
-@st.cache_resource
-def load_ai_model():
-    from transformers import CLIPProcessor, CLIPModel
-
-    model_name = "openai/clip-vit-base-patch32"
-    processor = CLIPProcessor.from_pretrained(model_name)
-    model = CLIPModel.from_pretrained(model_name)
-    return processor, model
-
-
-def classify_image(image, labels):
-    import torch
-
-    processor, model = load_ai_model()
-
-    prompts = [
-        f"a side scan sonar image showing {label}"
-        for label in labels
-    ]
-
-    inputs = processor(
-        text=prompts,
-        images=image,
-        return_tensors="pt",
-        padding=True
-    )
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-        probs = outputs.logits_per_image.softmax(dim=1)[0]
-
-    results = []
-    for label, probability in zip(labels, probs):
-        results.append({
-            "Type": label,
-            "Confidence": float(probability)
-        })
-
-    results.sort(key=lambda x: x["Confidence"], reverse=True)
-    return results
-# ============================================================
-# SONAR IMAGE VALIDATION
-# ============================================================
-
-def validate_sonar_image(image):
-    """
-    Dedicated SONAR vs NON-SONAR gate.
-
-    This does NOT use the debris/object labels. It asks CLIP the
-    same binary question several different ways and averages the
-    pairwise sonar probabilities. This is more reliable than
-    putting "unclear sonar scene" into the same competition.
-    """
-
-    import torch
-
-    processor, model = load_ai_model()
-
-    prompt_pairs = [
-        (
-            "a genuine side-scan sonar image",
-            "a normal camera photograph"
-        ),
-        (
-            "an acoustic sonar scan of the seafloor",
-            "an ordinary underwater camera photograph"
-        ),
-        (
-            "a marine sonar survey image",
-            "a regular underwater photograph"
-        ),
-        (
-            "a side-looking sonar / sidescan sonar image",
-            "a non-sonar photograph"
-        ),
-        (
-            "a grayscale sonar waterfall or seabed scan",
-            "a normal grayscale photograph"
-        ),
-        (
-            "an underwater acoustic imaging scan",
-            "a conventional underwater photo"
-        )
-    ]
-
-    sonar_probabilities = []
-
-    for sonar_prompt, non_sonar_prompt in prompt_pairs:
-
-        inputs = processor(
-            text=[sonar_prompt, non_sonar_prompt],
-            images=image,
-            return_tensors="pt",
-            padding=True
-        )
-
-        with torch.no_grad():
-            outputs = model(**inputs)
-
-        pair_probability = (
-            outputs.logits_per_image
-            .softmax(dim=1)[0][0]
-            .item()
-        )
-
-        sonar_probabilities.append(pair_probability)
-
-    sonar_probability = sum(
-        sonar_probabilities
-    ) / len(sonar_probabilities)
-
-    # For a hackathon prototype, 50% is the neutral point.
-    # We use a moderate gate so genuine sonar imagery is not
-    # rejected just because CLIP is uncertain.
-    is_sonar = sonar_probability >= sonar_threshold
-
-    return {
-        "is_sonar": is_sonar,
-        "sonar_probability": sonar_probability,
-        "pair_scores": sonar_probabilities
-    }
-
 
 
 # ============================================================
-# SIDEBAR - ANALYSIS SETTINGS
-# ============================================================
-
-st.sidebar.header("⚙️ Analysis Settings")
-
-threshold = st.sidebar.slider(
-    "Minimum object confidence",
-    0.0,
-    1.0,
-    0.20,
-    0.01
-)
-
-sonar_threshold = st.sidebar.slider(
-    "Sonar validation threshold",
-    0.45,
-    0.80,
-    0.52,
-    0.01,
-    help="Lower values accept uncertain sonar images; higher values make validation stricter."
-)
-
-st.sidebar.info(
-    "Only images classified as sonar/side-scan sonar will continue "
-    "to the debris analysis."
-)
-# ============================================================
-# GPS VALUES - ALWAYS INITIALIZED
+# GPS VALUES
 # ============================================================
 
 latitude = 0.0
+
 longitude = 0.0
+
 gps_source = "No GPS"
 
-if gps_mode == "Real GPS / Survey CSV" and survey_df is not None:
-    latitude = float(survey_df.iloc[0]["latitude"])
-    longitude = float(survey_df.iloc[0]["longitude"])
-    gps_source = "Verified survey CSV"
+
+if (
+
+    gps_mode
+    ==
+    "Real GPS / Survey CSV"
+
+    and
+
+    survey_df is not None
+
+):
+
+    latitude = float(
+
+        survey_df.iloc[0][
+            "latitude"
+        ]
+
+    )
+
+
+    longitude = float(
+
+        survey_df.iloc[0][
+            "longitude"
+        ]
+
+    )
+
+
+    gps_source = (
+        "Verified survey CSV"
+    )
+
 
 elif gps_mode == "Simulator GPS":
-    latitude = float(simulator_lat)
-    longitude = float(simulator_lon)
-    gps_source = "Simulator GPS"
+
+    latitude = float(
+        simulator_lat
+    )
+
+    longitude = float(
+        simulator_lon
+    )
+
+    gps_source = (
+        "Simulator GPS"
+    )
 
 
+# ============================================================
+# IMAGE UPLOAD
+# ============================================================
 
-# -----------------------------
-# Upload
-# -----------------------------
 uploaded_file = st.file_uploader(
+
     "📤 Upload an underwater or side-scan sonar image",
-    type=["jpg", "jpeg", "png", "bmp", "webp"]
+
+    type=[
+        "jpg",
+        "jpeg",
+        "png",
+        "bmp",
+        "webp"
+    ]
 )
 
+
 if uploaded_file is None:
-    st.info("Upload a sonar image to begin analysis.")
+
+    st.info(
+        "Upload a sonar image to begin analysis."
+    )
+
     st.stop()
 
-image = Image.open(uploaded_file).convert("RGB")
 
-col1, col2 = st.columns([1.1, 1])
+# ============================================================
+# OPEN IMAGE
+# ============================================================
 
-with col1:
-    st.subheader("Input Image")
-    st.image(image, use_container_width=True)
+try:
+
+    image = Image.open(
+        uploaded_file
+    ).convert("RGB")
+
+except Exception:
+
+    st.error(
+        "❌ Could not read this image. "
+        "Please upload a valid image."
+    )
+
+    st.stop()
+
 
 # ============================================================
 # SONAR VALIDATION
 # ============================================================
 
-with st.spinner("🔎 Checking whether the image is a sonar image..."):
+with st.spinner(
+    "🔎 Validating sonar image..."
+):
 
-    sonar_check = validate_sonar_image(image)
+    sonar_check = validate_sonar_image(
 
-sonar_probability = sonar_check["sonar_probability"]
+        image,
 
-# ------------------------------------------------------------
-# IMPORTANT:
-# Stop the application if the image is not sonar.
-# No debris/object classification is performed.
-# ------------------------------------------------------------
+        sonar_threshold=SONAR_THRESHOLD
+    )
 
-if sonar_probability < sonar_threshold:
 
-    with col2:
+sonar_probability = (
 
-        st.subheader("AI Analysis")
+    sonar_check[
+        "sonar_probability"
+    ]
 
-        st.error(
-            "❌ Invalid image: This does not appear to be a "
-            "sonar / side-scan sonar image."
+)
+
+
+# ============================================================
+# INVALID IMAGE
+# ============================================================
+
+if sonar_probability < SONAR_THRESHOLD:
+
+    left, right = st.columns(
+        [1.15, 1]
+    )
+
+
+    with left:
+
+        st.subheader(
+            "🛰️ Input Image"
         )
 
+        st.image(
+
+            image,
+
+            use_container_width=True
+        )
+
+
+    with right:
+
+        st.subheader(
+            "🤖 AI Analysis"
+        )
+
+
+        st.error(
+
+            "❌ Invalid image\n\n"
+            "This does not appear to be "
+            "a sonar / side-scan sonar image."
+        )
+
+
         st.metric(
+
             "Sonar confidence",
+
             f"{sonar_probability:.1%}"
         )
 
+
         st.warning(
-            "Please upload a genuine underwater sonar or "
+
+            "Please upload a genuine "
+            "underwater sonar or "
             "side-scan sonar image."
         )
 
-        st.info(
-            "Examples accepted: side-scan sonar scans, "
-            "underwater acoustic sonar survey images, and "
-            "seabed sonar imagery."
-        )
-
-    st.divider()
-
-    st.subheader("🚫 Analysis stopped")
-
-    st.write(
-        "Aquadex AI does not run marine-debris classification "
-        "on non-sonar images."
-    )
-
-    st.caption(
-        "Note: This is a prototype sonar gate. It is not a "
-        "sonar-trained scientific classifier."
-    )
 
     st.stop()
 
+
 # ============================================================
-# SONAR ACCEPTED
+# YOLO DETECTION
 # ============================================================
 
-with col2:
+with st.spinner(
+    "🎯 Detecting debris..."
+):
 
-    st.subheader("AI Analysis")
+    (
+        annotated_image,
+        debris_detections,
+        debris_model_path
+    ) = detect_debris(
 
-    st.success(
-        f"✅ Sonar image accepted\n\n"
-        f"**Sonar confidence:** {sonar_probability:.1%}"
+        image,
+
+        confidence=confidence_threshold
     )
 
-    st.caption(
-        "Sonar validation uses six independent sonar-vs-photo "
-        "comparisons and averages their results."
-    )
+
+# ============================================================
+# CLASSIFICATION
+# ============================================================
+
+with st.spinner(
+    "🤖 AI is analysing the sonar image..."
+):
 
 
-# -----------------------------
-# Classification
-# -----------------------------
-with st.spinner("AI is analysing the sonar image..."):
+    # --------------------------------------------------------
+    # BROAD CLASSIFICATION
+    # --------------------------------------------------------
 
-    # First: broad classification
     broad_labels = [
+
         "a man-made object or marine debris",
+
         "a natural underwater object",
+
         "an unclear or ambiguous sonar scene"
+
     ]
 
-    broad_results = classify_image(image, broad_labels)
+
+    broad_results = classify_image(
+
+        image,
+
+        broad_labels
+    )
+
 
     broad_best = broad_results[0]
-    broad_conf = broad_best["Confidence"]
 
-    # Second: object type
-    object_labels = [
-        "a shipwreck",
-        "an underwater pipe or pipeline",
-        "plastic debris",
-        "a fishing net or ghost net",
-        "metal debris",
-        "a concrete or artificial structure",
-        "natural rock or seabed formation",
-        "another man-made marine object",
-        "an unclear sonar object"
-    ]
-
-    type_results = classify_image(image, object_labels)
-
-    type_best = type_results[0]
-    type_conf = type_best["Confidence"]
-
-
-# -----------------------------
-# Results
-# -----------------------------
-with col2:
-    st.subheader("AI Analysis")
-
-    broad_name = broad_best["Type"]
-    broad_display = broad_name.replace("a ", "").replace("an ", "").capitalize()
-
-    if broad_conf >= threshold:
-        st.success(
-            f"**Classification:** {broad_display}\n\n"
-            f"**Confidence:** {broad_conf:.1%}"
-        )
-    else:
-        st.warning(
-            f"No broad classification above the selected threshold.\n\n"
-            f"Top result: {broad_display} ({broad_conf:.1%})"
-        )
-
-    st.divider()
-
-    type_name = type_best["Type"]
-    type_display = type_name.replace("a ", "").replace("an ", "").capitalize()
-
-    st.metric(
-        "Most likely object type",
-        type_display,
-        f"{type_conf:.1%} confidence"
+    broad_conf = (
+        broad_best[
+            "Confidence"
+        ]
     )
 
-    if type_conf >= threshold:
-        st.info(
-            f"**AI interpretation:** The image is most similar to "
-            f"**{type_display}** among the requested categories."
+
+    # --------------------------------------------------------
+    # OBJECT TYPE CLASSIFICATION
+    # --------------------------------------------------------
+
+    object_labels = [
+
+        "a shipwreck",
+
+        "an underwater pipe or pipeline",
+
+        "plastic debris",
+
+        "a fishing net or ghost net",
+
+        "metal debris",
+
+        "a concrete or artificial structure",
+
+        "natural rock or seabed formation",
+
+        "another man-made marine object",
+
+        "an unclear sonar object"
+
+    ]
+
+
+    type_results = classify_image(
+
+        image,
+
+        object_labels
+    )
+
+
+    type_best = type_results[0]
+
+    type_conf = (
+        type_best[
+            "Confidence"
+        ]
+    )
+
+
+# ============================================================
+# DISPLAY NAMES
+# ============================================================
+
+broad_name = broad_best["Type"]
+
+
+broad_display = (
+
+    broad_name
+
+    .replace(
+        "a ",
+        ""
+    )
+
+    .replace(
+        "an ",
+        ""
+    )
+
+    .capitalize()
+
+)
+
+
+type_name = type_best["Type"]
+
+
+type_display = (
+
+    type_name
+
+    .replace(
+        "a ",
+        ""
+    )
+
+    .replace(
+        "an ",
+        ""
+    )
+
+    .capitalize()
+
+)
+
+
+# ============================================================
+# SINGLE-SCREEN MAIN DASHBOARD
+# ============================================================
+
+st.divider()
+
+
+left_col, right_col = st.columns(
+
+    [1.15, 1],
+
+    gap="medium"
+)
+
+
+# ============================================================
+# LEFT SIDE - IMAGE
+# ============================================================
+
+with left_col:
+
+    st.subheader(
+        "🛰️ Sonar Image"
+    )
+
+
+    if debris_detections:
+
+        st.image(
+
+            annotated_image,
+
+            caption=(
+                "ONE highest-confidence "
+                "debris detection"
+            ),
+
+            use_container_width=True
         )
+
     else:
-        st.warning(
-            "The object-type confidence is below the selected threshold."
+
+        st.image(
+
+            image,
+
+            caption=(
+                "No debris detected "
+                "above selected confidence"
+            ),
+
+            use_container_width=True
         )
+
+
+# ============================================================
+# RIGHT SIDE - AI RESULTS
+# ============================================================
+
+with right_col:
+
+    st.subheader(
+        "🤖 AI Analysis"
+    )
+
+
+    # --------------------------------------------------------
+    # SONAR RESULT
+    # --------------------------------------------------------
+
+    st.success(
+
+        f"✅ **Sonar image accepted**\n\n"
+        f"**Sonar confidence:** "
+        f"{sonar_probability:.1%}"
+    )
+
+
+    # --------------------------------------------------------
+    # DEBRIS RESULT
+    # --------------------------------------------------------
+
+    if debris_detections:
+
+        best_detection = (
+            debris_detections[0]
+        )
+
+
+        detected_type = (
+            best_detection["type"]
+            .title()
+        )
+
+
+        detected_confidence = (
+            best_detection["confidence"]
+        )
+
+
+        st.markdown(
+            "### 🎯 Debris Detection"
+        )
+
+
+        st.success(
+
+            f"**{detected_type}**\n\n"
+            f"Confidence: "
+            f"**{detected_confidence:.1%}**"
+        )
+
+
+        st.caption(
+            "Only the highest-confidence "
+            "detection is displayed."
+        )
+
+
+    elif debris_model_path is None:
+
+        st.error(
+            "❌ `best.pt` not found."
+        )
+
+
+        st.caption(
+
+            "Place best.pt in the same "
+            "folder as app.py."
+        )
+
+
+    else:
+
+        st.warning(
+
+            "No debris detected above "
+            f"{confidence_threshold:.0%}."
+        )
+
+
+    # --------------------------------------------------------
+    # OBJECT CLASSIFICATION
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### 🔎 AI Classification"
+    )
+
+
+    st.info(
+
+        f"**{type_display}**\n\n"
+        f"Confidence: **{type_conf:.1%}**"
+    )
+
+
+    # --------------------------------------------------------
+    # GPS
+    # --------------------------------------------------------
+
+    st.markdown(
+        "### 📍 Survey Location"
+    )
+
+
+    gps_col1, gps_col2 = st.columns(2)
+
+
+    with gps_col1:
+
+        st.metric(
+
+            "Latitude",
+
+            f"{latitude:.6f}"
+        )
+
+
+    with gps_col2:
+
+        st.metric(
+
+            "Longitude",
+
+            f"{longitude:.6f}"
+        )
+
+
+    st.caption(
+        f"GPS source: {gps_source}"
+    )
+
+
+# ============================================================
+# COMPACT DETAILS
+# ============================================================
+
+st.divider()
+
+
+# ============================================================
+# DETECTION DETAILS
+# ============================================================
+
+with st.expander(
+    "🔎 Detection Details"
+):
+
+
+    if debris_detections:
+
+        detection_table = pd.DataFrame([
+
+            {
+
+                "Debris type":
+                    d["type"],
+
+                "Confidence":
+                    f'{d["confidence"]:.1%}',
+
+                "X":
+                    d["x1"],
+
+                "Y":
+                    d["y1"],
+
+                "Width":
+                    d["width"],
+
+                "Height":
+                    d["height"]
+
+            }
+
+            for d in debris_detections
+
+        ])
+
+
+        st.dataframe(
+
+            detection_table,
+
+            use_container_width=True,
+
+            hide_index=True
+        )
+
+
+    else:
+
+        st.write(
+            "No debris detections."
+        )
+
+
+# ============================================================
+# OBJECT TYPE COMPARISON
+# ============================================================
+
+with st.expander(
+    "📊 Object Type Comparison"
+):
+
+
+    table = pd.DataFrame(
+        type_results
+    )
+
+
+    table["Confidence"] = (
+
+        table["Confidence"]
+
+        .map(
+            lambda x:
+            f"{x:.1%}"
+        )
+
+    )
+
+
+    st.dataframe(
+
+        table,
+
+        use_container_width=True,
+
+        hide_index=True
+    )
+
+
 # ============================================================
 # SONAR VALIDATION DETAILS
 # ============================================================
 
-st.divider()
-st.subheader("🛰️ Sonar Validation")
+with st.expander(
+    "🛰️ Sonar Validation"
+):
 
+
+    validation_table = pd.DataFrame([
+
+        {
+
+            "Check":
+                "Sonar image",
+
+            "Result":
+                "PASS",
+
+            "Confidence":
+                f"{sonar_probability:.1%}"
+
+        },
+
+        {
+
+            "Check":
+                "Object analysis",
+
+            "Result":
+                "RUN",
+
+            "Confidence":
+                f"{type_conf:.1%}"
+
+        }
+
+    ])
+
+
+    st.dataframe(
+
+        validation_table,
+
+        use_container_width=True,
+
+        hide_index=True
+    )
+
+
+    st.caption(
+
+        "Sonar validation uses six "
+        "independent sonar-vs-photo "
+        "comparisons and averages "
+        "their results."
+    )
 # ============================================================
 # GOOGLE MAPS LOCATION LINK
 # ============================================================
@@ -560,79 +1713,216 @@ validation_table = pd.DataFrame([
 ])
 
 
-# -----------------------------
-# Ranking
-# -----------------------------
-st.divider()
-st.subheader("🔎 Object Type Comparison")
-
-table = pd.DataFrame(type_results)
-table["Confidence"] = table["Confidence"].map(lambda x: f"{x:.1%}")
-
-st.dataframe(
-    table,
-    use_container_width=True,
-    hide_index=True
-)
 
 
-# -----------------------------
-# Export
-# -----------------------------
-st.divider()
-st.subheader("📊 Export Report")
 
-report = {
-    "project": "Aquadex AI",
-    "image": uploaded_file.name,
-    "timestamp": datetime.now().isoformat(),
-     "sonar_validation": "PASS",
-    "sonar_confidence": round(sonar_probability,4),
-    "broad_classification": broad_display,
-    "broad_confidence": round(broad_conf, 4),
-    "object_type": type_display,
-    "object_confidence": round(type_conf, 4),
-    "latitude": latitude,
-    "longitude": longitude,
-    "gps_source": gps_source,
-    "model": "OpenAI CLIP ViT-B/32 zero-shot classifier",
-    "note": (
-        "Prototype only. Zero-shot CLIP is not a sonar-trained "
-        "scientific classifier."
-    )
-}
-
-json_data = json.dumps(report, indent=4)
-
-st.download_button(
-    "⬇️ Download JSON report",
-    data=json_data,
-    file_name="aquadex_report.json",
-    mime="application/json"
-)
 # ============================================================
-# CSV REPORT
+# EXPORT REPORT
 # ============================================================
 
-# Convert report dictionary to a one-row DataFrame
-csv_df = pd.DataFrame([report])
+with st.expander(
+    "📥 Export Report"
+):
 
-# Convert complex values (lists/dictionaries) to text
-for col in csv_df.columns:
-    csv_df[col] = csv_df[col].apply(
-        lambda x: json.dumps(x) if isinstance(x, (dict, list)) else x
+
+    report = {
+
+        "project":
+            "Aquadex AI",
+
+        "image":
+            uploaded_file.name,
+
+        "timestamp":
+            datetime.now().isoformat(),
+
+        "sonar_validation":
+            "PASS",
+
+        "sonar_confidence":
+            round(
+                sonar_probability,
+                4
+            ),
+
+        "broad_classification":
+            broad_display,
+
+        "broad_confidence":
+            round(
+                broad_conf,
+                4
+            ),
+
+        "object_type":
+            type_display,
+
+        "object_confidence":
+            round(
+                type_conf,
+                4
+            ),
+
+        "latitude":
+            latitude,
+
+        "longitude":
+            longitude,
+
+        "gps_source":
+            gps_source,
+
+        "debris_detections":
+            debris_detections,
+
+        "debris_model":
+            (
+                debris_model_path
+                if debris_model_path
+                else
+                "best.pt not found"
+            ),
+
+        "model":
+            (
+                "OpenAI CLIP ViT-B/32 "
+                "zero-shot classifier + "
+                "YOLO debris detector"
+            ),
+
+        "detection_settings":
+            {
+
+                "confidence":
+                    confidence_threshold,
+
+                "iou":
+                    0.50,
+
+                "max_detections":
+                    1
+
+            },
+
+        "note":
+            (
+                "Prototype only. CLIP was "
+                "not trained specifically "
+                "for side-scan sonar or "
+                "marine debris."
+            )
+
+    }
+
+
+    # --------------------------------------------------------
+    # JSON
+    # --------------------------------------------------------
+
+    json_data = json.dumps(
+
+        report,
+
+        indent=4
     )
 
-csv_data = csv_df.to_csv(index=False)
 
-st.download_button(
-    label="📊 Download CSV Report",
-    data=csv_data,
-    file_name="aquadex_report.csv",
-    mime="text/csv"
-)
+    st.download_button(
+
+        "⬇️ Download JSON Report",
+
+        data=json_data,
+
+        file_name=(
+            "aquadex_report.json"
+        ),
+
+        mime="application/json"
+    )
+
+
+    # --------------------------------------------------------
+    # CSV
+    # --------------------------------------------------------
+
+    csv_report = {
+
+        "Project":
+            report["project"],
+
+        "Image":
+            report["image"],
+
+        "Timestamp":
+            report["timestamp"],
+
+        "Sonar Validation":
+            report["sonar_validation"],
+
+        "Sonar Confidence":
+            report["sonar_confidence"],
+
+        "Classification":
+            report["broad_classification"],
+
+        "Classification Confidence":
+            report["broad_confidence"],
+
+        "Object Type":
+            report["object_type"],
+
+        "Object Confidence":
+            report["object_confidence"],
+
+        "Latitude":
+            report["latitude"],
+
+        "Longitude":
+            report["longitude"],
+
+        "GPS Source":
+            report["gps_source"],
+
+        "Number of Debris Detections":
+            len(
+                debris_detections
+            ),
+
+        "YOLO Model":
+            report["debris_model"]
+
+    }
+
+
+    csv_df = pd.DataFrame(
+        [csv_report]
+    )
+
+
+    csv_data = csv_df.to_csv(
+        index=False
+    )
+
+
+    st.download_button(
+
+        "⬇️ Download CSV Report",
+
+        data=csv_data,
+
+        file_name=(
+            "aquadex_report.csv"
+        ),
+
+        mime="text/csv"
+    )
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
 st.caption(
-    "Important: This is a prototype. CLIP was not trained specifically "
-    "for side-scan sonar, so its results should not be treated as verified "
-    "marine-debris identification."
+    "🌊 Aquadex AI • Sonar validation + "
+    "YOLO debris detection + CLIP classification + GPS tagging"
 )
