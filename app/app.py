@@ -353,8 +353,8 @@ def detect_debris(image, confidence=0.25):
     # --------------------------------------------------------
 
     font_size = max(
-        100,
-        int(min(image.size) / 40)
+        40,
+        int(min(image.size) / 20)
     )
 
 
@@ -411,8 +411,8 @@ def detect_debris(image, confidence=0.25):
         [
             x1,
             label_y,
-            x1 + label_w + 14,
-            label_y + label_h + 10
+            x1 + label_w + 24,
+            label_y + label_h + 18
         ],
 
         fill=(255, 0, 0)
@@ -426,8 +426,8 @@ def detect_debris(image, confidence=0.25):
     draw.text(
 
         (
-            x1 + 7,
-            label_y + 4
+            x1 + 12,
+            label_y + 7
         ),
 
         label,
