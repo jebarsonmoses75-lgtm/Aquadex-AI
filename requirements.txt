@@ -1,9 +1,8 @@
 streamlit
 ultralytics
 opencv-python-headless
-torch
-torchvision
-pandas
-numpy
 pillow
-transformers
+numpy
+pandas
+folium
+streamlit-folium
